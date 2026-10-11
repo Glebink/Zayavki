@@ -378,7 +378,6 @@ function detailHTML(r) {
     <div class="panel"><div class="panel-head"><h2>Позиции <span class="mono muted">${r.items.length}</span></h2></div>
       ${r.items.length ? r.items.map((i) => itemHTML(r, i)).join('') : '<div class="empty">Позиций нет</div>'}</div>
     <div class="cols">
-      <div class="card"><h2>История статусов</h2><div class="log">${h ? (stRows || '<div class="muted">Пока без изменений</div>') : '<div class="muted">Загрузка…</div>'}</div></div>
       <div class="card"><h2>История позиций</h2><div class="log">${h ? (itRows || '<div class="muted">Пока пусто</div>') : '<div class="muted">Загрузка…</div>'}</div></div>
     </div>`;
 }
@@ -762,9 +761,9 @@ async function doLogin(login, password, remember) {
   if (remember) { authStore.mode = 'local'; clearTabSession(); } else authStore.mode = 'session';
   try {
     const { error } = await sb.auth.signInWithPassword({ email: emailOf(login), password });
-    if (error) return /invalid/i.test(error.message) ? false : errMsg(error);
+    if (error) return /invalid/i.test(error.message) ? false : errMsg(error) + ' (' + (error.message || error.name) + ')';
     return true;
-  } catch (e) { return errMsg(e); }
+  } catch (e) { return errMsg(e) + ' (' + ((e && e.message) || e) + ')'; }
 }
 async function logout() {
   closeModal();
