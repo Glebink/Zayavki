@@ -53,6 +53,7 @@ const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
 const fmt = (s) => new Date(s).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const fmtShort = (s) => { const d = new Date(s); const p = (n) => String(n).padStart(2, '0'); return p(d.getDate()) + '.' + p(d.getMonth() + 1) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); };
 const fmtFull = (s) => new Date(s).toLocaleString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 const ERR_MAP = [
   [/row-level security|violates row-level|permission denied|not allowed|forbidden|\b403\b/i, 'Нет прав на это действие. Возможно, вы вошли под другим пользователем — обновите страницу.'],
@@ -184,13 +185,13 @@ function isUnread(r) {
 }
 function bossSeen(r) {
   // состояние просмотра заявки начальником (для заявителя)
-  if (r.last_activity_by && S.profiles[r.last_activity_by] && S.profiles[r.last_activity_by].role === 'boss') return { ok: true, text: 'Просмотрено начальником, ' + fmt(r.last_activity_at) };
+  if (r.last_activity_by && S.profiles[r.last_activity_by] && S.profiles[r.last_activity_by].role === 'boss') return { ok: true, text: 'просмотрено ' + fmtShort(r.last_activity_at) };
   const v = S.bossViews[r.id];
-  if (!v) return { ok: false, text: 'Не просмотрено начальником' };
-  if (Date.parse(v.seen_at) >= Date.parse(r.last_activity_at)) return { ok: true, text: 'Просмотрено начальником, ' + fmt(v.seen_at) };
-  return { ok: false, text: 'Есть изменения, начальник их ещё не видел' };
+  if (!v) return { ok: false, text: 'не просмотрено' };
+  if (Date.parse(v.seen_at) >= Date.parse(r.last_activity_at)) return { ok: true, text: 'просмотрено ' + fmtShort(v.seen_at) };
+  return { ok: false, text: 'есть изменения, не просмотрено' };
 }
-const eyeTag = (r) => { const b = bossSeen(r); return `<span class="seen ${b.ok ? 'ok' : ''}">${b.ok ? '👁 ' : '○ '}${esc(b.text)}</span>`; };
+const eyeTag = (r) => { const b = bossSeen(r); return `<span class="seen ${b.ok ? 'ok' : ''}">${esc(b.text)}</span>`; };
 function counts(items) {
   const c = { new: 0, rejected: 0, accepted: 0, ordered: 0 };
   items.forEach((i) => { c[i.status]++; });
