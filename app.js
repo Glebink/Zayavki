@@ -303,10 +303,9 @@ function reqCard(r, sel) {
   const n = r.items.length;
   return `<a class="req-card ${sel ? 'sel' : ''}" href="#/r/${r.id}">
     <div class="row between"><span class="mono">№ ${r.number}</span>
-      ${isUnread(r) ? '<span class="badge-new">Новое</span>' : (!r.archived_at && allDone && isReq() ? '<span class="tag-ok">Можно в архив</span>' : '')}
+      <span class="row" style="gap:8px">${isUnread(r) ? '<span class="badge-new">Новое</span>' : (!r.archived_at && allDone && isReq() ? '<span class="tag-ok">Можно в архив</span>' : '')}${isReq() ? eyeTag(r) : ''}</span>
     </div>
     <div class="muted" style="font-size:13px;margin-top:4px">${fmt(r.created_at)} · ${plural(n, 'позиция', 'позиции', 'позиций')}</div>
-    ${isReq() ? `<div style="margin-top:6px">${eyeTag(r)}</div>` : ''}
     <div class="minis">${chips}</div></a>`;
 }
 
@@ -372,9 +371,8 @@ function detailHTML(r) {
   return `
     <a class="btn back-mobile" href="#/${r.archived_at ? 'archive' : ''}" style="align-self:flex-start">${ICON.back}Назад</a>
     <div class="head-card">
-      <div><h1>Заявка № ${r.number}</h1>
-        <div class="muted" style="font-size:14px;margin-top:4px">Создана ${fmtFull(r.created_at)} · автор: ${esc(nameOf(r.created_by))}${r.archived_at ? ' · в архиве' : ''}</div>
-        ${isReq() ? `<div style="margin-top:6px">${eyeTag(r)}</div>` : ''}</div>
+      <div style="flex:1;min-width:0"><div class="row between" style="align-items:flex-start"><h1>Заявка № ${r.number}</h1>${isReq() ? eyeTag(r) : ''}</div>
+        <div class="muted" style="font-size:14px;margin-top:4px">Создана ${fmtFull(r.created_at)} · автор: ${esc(nameOf(r.created_by))}${r.archived_at ? ' · в архиве' : ''}</div></div>
       <div class="actions">${acts}</div>
     </div>
     <div class="panel"><div class="panel-head"><h2>Позиции <span class="mono muted">${r.items.length}</span></h2></div>
