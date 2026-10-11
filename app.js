@@ -1,13 +1,21 @@
 'use strict';
 /* Заявки на закупку — PWA на Supabase. Без сборки, один файл. */
-const APP_VERSION = 'v1.0';
+const APP_VERSION = 'v1.1';
 const SUPABASE_URL = 'https://okgzagezzeeglkyrwbzv.supabase.co';
 // Публичный (anon) ключ: его безопасно хранить в коде, доступ ограничивают правила RLS на сервере.
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9rZ3phZ2V6emVlZ2xreXJ3Ynp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE3MzkyNjksImV4cCI6MjEwNzMxNTI2OX0.aVPwcJI4dtXEDhfy9pLXKH_nVVcsNgg69vC9mRqrPGU';
 const LOGIN_DOMAIN = 'zayavki.app';
 
+// Хранилище сессии: «только это окно» (sessionStorage) или «запомнить на устройстве» (localStorage).
+// Окно с сессией в sessionStorage не зависит от других окон — можно тестировать две роли в двух вкладках.
+const authStore = {
+  mode: 'local',
+  getItem(k) { try { const a = sessionStorage.getItem(k); return a !== null ? a : localStorage.getItem(k); } catch (e) { return null; } },
+  setItem(k, v) { try { if (authStore.mode === 'session' || sessionStorage.getItem(k) !== null) sessionStorage.setItem(k, v); else localStorage.setItem(k, v); } catch (e) {} },
+  removeItem(k) { try { sessionStorage.removeItem(k); localStorage.removeItem(k); } catch (e) {} }
+};
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storage: authStore }
 });
 
 const STATUS = {
@@ -37,7 +45,7 @@ const ICON = {
 const S = {
   ready: false, me: null, role: null, profiles: {}, requests: [], catalog: [], views: {},
   photoUrls: {}, photoStamp: 0, hist: {}, histLoading: {},
-  q: '', filter: 'all', draft: null, sheet: null, confirm: null, photo: null
+  account: false, bossViews: {}, q: '', filter: 'all', draft: null, sheet: null, confirm: null, photo: null
 };
 
 /* ---------- утилиты ---------- */
@@ -46,7 +54,28 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
 const fmt = (s) => new Date(s).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 const fmtFull = (s) => new Date(s).toLocaleString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-const errMsg = (e) => (e && (e.message || e.error_description)) || String(e);
+const ERR_MAP = [
+  [/row-level security|violates row-level|permission denied|not allowed|forbidden|\b403\b/i, 'Нет прав на это действие. Возможно, вы вошли под другим пользователем — обновите страницу.'],
+  [/failed to fetch|networkerror|network request failed|load failed|fetch failed|timeout|timed out|offline/i, 'Нет связи с сервером. Проверьте интернет и повторите.'],
+  [/jwt|token.*(expired|invalid)|invalid.*token|not authenticated|session.*(missing|expired)|refresh token/i, 'Сессия закончилась. Откройте личную ссылку снова.'],
+  [/invalid login credentials|invalid.*credentials/i, 'Неверный логин или пароль.'],
+  [/password should be at least|at least \d+ characters|weak password/i, 'Пароль слишком короткий. Нужно не меньше 6 символов.'],
+  [/different from the old|same as the old|should be different/i, 'Новый пароль должен отличаться от старого.'],
+  [/payload too large|exceeded the maximum|too large|\b413\b|file size/i, 'Файл слишком большой. Максимум 2 МБ.'],
+  [/mime type|not supported|invalid file type|unsupported/i, 'Этот формат файла не поддерживается. Нужен JPG, PNG или WebP.'],
+  [/duplicate key|already exists|unique constraint/i, 'Такая запись уже есть.'],
+  [/violates check constraint|invalid input|null value|not-null|violates not-null/i, 'Некорректные данные. Проверьте поля и повторите.'],
+  [/foreign key/i, 'Связанная запись не найдена. Обновите страницу.'],
+  [/bucket not found|object not found|not found|\b404\b/i, 'Данные не найдены. Обновите страницу.'],
+  [/too many requests|rate limit|\b429\b/i, 'Слишком много запросов. Подождите немного.'],
+  [/\b5\d\d\b|internal server error|bad gateway|unavailable/i, 'Ошибка сервера. Повторите позже.']
+];
+const errMsg = (e) => {
+  const m = String((e && (e.message || e.error_description || e.error)) || e || '');
+  if (/[а-яё]/i.test(m)) return m;
+  for (const [re, ru] of ERR_MAP) if (re.test(m)) return ru;
+  return 'Что-то пошло не так. Повторите попытку.';
+};
 const isDone = (i) => i.status === 'rejected' || i.status === 'ordered';
 const isReq = () => S.role === 'requester';
 const isBoss = () => S.role === 'boss';
@@ -92,13 +121,15 @@ async function loadAll() {
   ]);
   const err = rq.error || cat.error || pr.error || vw.error;
   if (err) throw err;
+  if (!pr.data.some((p) => p.user_id === S.me.id)) throw new Error('Для этой ссылки не назначена роль.');
   S.requests = rq.data.map((r) => ({
     ...r,
     items: (r.request_items || []).sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
   }));
   S.catalog = cat.data;
   S.profiles = Object.fromEntries(pr.data.map((p) => [p.user_id, p]));
-  S.views = Object.fromEntries(vw.data.map((v) => [v.request_id, v]));
+  S.views = Object.fromEntries(vw.data.filter((v) => v.user_id === S.me.id).map((v) => [v.request_id, v]));
+  S.bossViews = Object.fromEntries(vw.data.filter((v) => S.profiles[v.user_id] && S.profiles[v.user_id].role === 'boss').map((v) => [v.request_id, v]));
   S.role = S.profiles[S.me.id] && S.profiles[S.me.id].role;
   await signPhotos();
 }
@@ -131,7 +162,7 @@ async function refresh() {
     const r = getRoute();
     if (r.name === 'detail') loadHist(r.id);
   } catch (e) {
-    if (/jwt|auth|token/i.test(errMsg(e))) showLocked('Сессия закончилась. Откройте личную ссылку снова.');
+    if (/Сессия закончилась/.test(errMsg(e))) showLogin('Сессия закончилась. Войдите снова.');
     else toast('Не удалось обновить: ' + errMsg(e));
   }
 }
@@ -141,6 +172,7 @@ function subscribe() {
   sb.channel('zayavki-live')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'requests' }, scheduleRefresh)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'request_items' }, scheduleRefresh)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'request_views' }, (p) => { const u = (p.new && p.new.user_id) || (p.old && p.old.user_id); if (u !== (S.me && S.me.id)) scheduleRefresh(); })
     .subscribe();
 }
 
@@ -150,6 +182,15 @@ function isUnread(r) {
   const v = S.views[r.id];
   return !v || Date.parse(r.last_activity_at) > Date.parse(v.seen_at);
 }
+function bossSeen(r) {
+  // состояние просмотра заявки начальником (для заявителя)
+  if (r.last_activity_by && S.profiles[r.last_activity_by] && S.profiles[r.last_activity_by].role === 'boss') return { ok: true, text: 'Просмотрено начальником, ' + fmt(r.last_activity_at) };
+  const v = S.bossViews[r.id];
+  if (!v) return { ok: false, text: 'Не просмотрено начальником' };
+  if (Date.parse(v.seen_at) >= Date.parse(r.last_activity_at)) return { ok: true, text: 'Просмотрено начальником, ' + fmt(v.seen_at) };
+  return { ok: false, text: 'Есть изменения, начальник их ещё не видел' };
+}
+const eyeTag = (r) => { const b = bossSeen(r); return `<span class="seen ${b.ok ? 'ok' : ''}">${b.ok ? '👁 ' : '○ '}${esc(b.text)}</span>`; };
 function counts(items) {
   const c = { new: 0, rejected: 0, accepted: 0, ordered: 0 };
   items.forEach((i) => { c[i.status]++; });
@@ -196,7 +237,7 @@ function render() {
       <div class="brand"><span class="brand-mark">${ICON.cart.replace('<svg', '<svg stroke="#fff"')}</span>Заявки на закупку</div>
       <nav class="tabs" aria-label="Разделы">${tabsHTML}</nav>
       ${isReq() ? `<a class="btn primary btn-new" href="#/new">${ICON.plus}Новая заявка</a>` : ''}
-      <span class="role-chip">Вы: ${esc(ROLE_LABEL[S.role] || '—')}</span>
+      <button class="role-chip" data-act="account" aria-label="Аккаунт">Вы: ${esc(ROLE_LABEL[S.role] || '—')} ▾</button>
     </header>
     <main class="main">${body}<div class="version">${APP_VERSION}</div></main>
     ${showBar ? `<nav class="bottom-nav" aria-label="Разделы">${navHTML}</nav>` : ''}
@@ -264,6 +305,7 @@ function reqCard(r, sel) {
       ${isUnread(r) ? '<span class="badge-new">Новое</span>' : (!r.archived_at && allDone && isReq() ? '<span class="tag-ok">Можно в архив</span>' : '')}
     </div>
     <div class="muted" style="font-size:13px;margin-top:4px">${fmt(r.created_at)} · ${plural(n, 'позиция', 'позиции', 'позиций')}</div>
+    ${isReq() ? `<div style="margin-top:6px">${eyeTag(r)}</div>` : ''}
     <div class="minis">${chips}</div></a>`;
 }
 
@@ -330,7 +372,8 @@ function detailHTML(r) {
     <a class="btn back-mobile" href="#/${r.archived_at ? 'archive' : ''}" style="align-self:flex-start">${ICON.back}Назад</a>
     <div class="head-card">
       <div><h1>Заявка № ${r.number}</h1>
-        <div class="muted" style="font-size:14px;margin-top:4px">Создана ${fmtFull(r.created_at)} · автор: ${esc(nameOf(r.created_by))}${r.archived_at ? ' · в архиве' : ''}</div></div>
+        <div class="muted" style="font-size:14px;margin-top:4px">Создана ${fmtFull(r.created_at)} · автор: ${esc(nameOf(r.created_by))}${r.archived_at ? ' · в архиве' : ''}</div>
+        ${isReq() ? `<div style="margin-top:6px">${eyeTag(r)}</div>` : ''}</div>
       <div class="actions">${acts}</div>
     </div>
     <div class="panel"><div class="panel-head"><h2>Позиции <span class="mono muted">${r.items.length}</span></h2></div>
@@ -431,6 +474,7 @@ async function submitDraft() {
 /* ---------- окно позиции ---------- */
 function openSheet(cfg) {
   S.sheet = { ...cfg, blob: null, previewUrl: null, busy: false, d: { name: '', shop_url: '', qty: 1, comment: '', photo_path: null, catalog_item_id: null, ...(cfg.data || {}) } };
+  S.sheet.orig = { ...S.sheet.d };
   renderModal();
 }
 function renderModal() {
@@ -438,7 +482,21 @@ function renderModal() {
   if (S.confirm) {
     m.hidden = false;
     m.innerHTML = `<div class="modal" role="dialog" aria-modal="true"><p style="margin:0;font-size:16px">${esc(S.confirm.text)}</p>
-      <div class="row" style="justify-content:flex-end"><button class="btn" data-act="confirm-no">Отмена</button><button class="btn danger" data-act="confirm-yes">${esc(S.confirm.yes || 'Удалить')}</button></div></div>`;
+      <div class="row" style="justify-content:flex-end"><button class="btn" data-act="confirm-no">${esc(S.confirm.no || 'Отмена')}</button><button class="btn danger" data-act="confirm-yes">${esc(S.confirm.yes || 'Удалить')}</button></div></div>`;
+    return;
+  }
+  if (S.account) {
+    m.hidden = false;
+    m.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="Аккаунт">
+      <div class="row between"><h2>Аккаунт</h2><button class="icon-btn" data-act="close-modal" aria-label="Закрыть">${ICON.close}</button></div>
+      <div class="muted" style="font-size:14px">Вы: ${esc(ROLE_LABEL[S.role] || '—')} · логин <strong>${esc((S.me.email || '').split('@')[0])}</strong></div>
+      <form id="pwform" class="stack" autocomplete="off">
+        <label class="field"><span>Новый пароль</span><input class="input" id="pw1" type="password" autocomplete="new-password" minlength="6" required></label>
+        <label class="field"><span>Повторите пароль</span><input class="input" id="pw2" type="password" autocomplete="new-password" minlength="6" required></label>
+        <button class="btn primary" type="submit" id="pwbtn">Сменить пароль</button>
+      </form>
+      <button class="btn danger" data-act="logout">Выйти</button>
+    </div>`;
     return;
   }
   if (S.photo) {
@@ -472,7 +530,21 @@ function renderModal() {
   }
   m.hidden = true; m.innerHTML = '';
 }
-function closeModal() { S.sheet = null; S.confirm = null; S.photo = null; renderModal(); }
+function sheetDirty() {
+  const s = S.sheet; if (!s) return false;
+  const d = s.d, o = s.orig || {};
+  return !!s.blob || ['name', 'shop_url', 'comment'].some((k) => String(d[k] || '') !== String(o[k] || '')) || String(d.qty) !== String(o.qty) || (d.photo_path || null) !== (o.photo_path || null);
+}
+function requestClose() {
+  if (S.confirm || S.photo || S.account) return closeModal();
+  if (S.sheet && !S.sheet.busy && sheetDirty()) {
+    const keep = S.sheet;
+    S.confirm = { text: 'Закрыть окно? Введённые данные не сохранятся.', yes: 'Закрыть', no: 'Продолжить', onYes: null, back: keep };
+    return renderModal();
+  }
+  closeModal();
+}
+function closeModal() { S.account = false; S.sheet = null; S.confirm = null; S.photo = null; renderModal(); }
 
 async function compressImage(file) {
   let bmp;
@@ -559,11 +631,13 @@ function askConfirm(text, yes, onYes) { S.confirm = { text, yes, onYes }; render
 
 document.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-act]');
-  if (!el) { if (e.target.id === 'modal') closeModal(); return; }
+  if (!el) { if (e.target.id === 'modal') requestClose(); return; }
   const act = el.dataset.act;
   const id = el.dataset.id;
   switch (act) {
     case 'filter': S.filter = el.dataset.f; render(); break;
+    case 'account': S.account = true; renderModal(); break;
+    case 'logout': logout(); break;
     case 'photo': S.photo = S.photoUrls[el.dataset.path]; if (S.photo) renderModal(); break;
     case 'close-modal': closeModal(); break;
     case 'set-status': setStatus(id, el.dataset.status); break;
@@ -610,10 +684,10 @@ document.addEventListener('click', async (e) => {
     }
     case 'draft-del': S.draft.items.splice(+el.dataset.idx, 1); render(); break;
     case 'submit': submitDraft(); break;
-    case 'sheet-cancel': closeModal(); break;
+    case 'sheet-cancel': requestClose(); break;
     case 'sheet-save': saveSheet(); break;
-    case 'confirm-no': closeModal(); break;
-    case 'confirm-yes': { const fn = S.confirm && S.confirm.onYes; closeModal(); if (fn) fn(); break; }
+    case 'confirm-no': { const b = S.confirm && S.confirm.back; S.confirm = null; if (b) S.sheet = b; renderModal(); break; }
+    case 'confirm-yes': { const fn = S.confirm && S.confirm.onYes; S.confirm = null; closeModal(); if (fn) fn(); break; }
     case 'qty-minus': case 'qty-plus': {
       const d = S.sheet.d; const cur = parseInt(d.qty, 10) || 1;
       d.qty = Math.max(1, cur + (act === 'qty-plus' ? 1 : -1));
@@ -656,28 +730,100 @@ document.addEventListener('change', async (e) => {
     } catch (err) { toast(errMsg(err)); }
   }
 });
+document.addEventListener('submit', async (e) => {
+  const f = e.target;
+  if (f.id === 'loginform') {
+    e.preventDefault();
+    const err = $('#lerr'), btn = $('#lbtn');
+    err.textContent = ''; btn.disabled = true; btn.textContent = 'Вход…';
+    const ok = await doLogin(f.login.value, f.password.value, f.remember.checked);
+    if (ok === true) { history.replaceState(null, '', location.pathname + location.search + '#/'); return startApp(); }
+    btn.disabled = false; btn.textContent = 'Войти';
+    err.textContent = ok === false ? 'Неверный логин или пароль.' : ok;
+  } else if (f.id === 'pwform') {
+    e.preventDefault();
+    const a = $('#pw1').value, b = $('#pw2').value;
+    if (a.length < 6) return toast('Пароль слишком короткий. Нужно не меньше 6 символов.');
+    if (a !== b) return toast('Пароли не совпадают.');
+    const btn = $('#pwbtn'); btn.disabled = true;
+    const { error } = await sb.auth.updateUser({ password: a });
+    btn.disabled = false;
+    if (error) return toast(errMsg(error));
+    closeModal(); toast('Пароль изменён');
+  }
+});
 window.addEventListener('hashchange', () => { closeModal(); render(); window.scrollTo(0, 0); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.ready) refresh(); });
 
-/* ---------- запуск ---------- */
+/* ---------- вход и запуск ---------- */
+const emailOf = (login) => { const l = String(login || '').trim().toLowerCase(); return l.includes('@') ? l : l + '@' + LOGIN_DOMAIN; };
+function clearTabSession() { try { Object.keys(sessionStorage).filter((k) => k.startsWith('sb-')).forEach((k) => sessionStorage.removeItem(k)); } catch (e) {} }
+async function doLogin(login, password, remember) {
+  if (!String(login || '').trim() || !password) return 'Введите логин и пароль.';
+  if (remember) { authStore.mode = 'local'; clearTabSession(); } else authStore.mode = 'session';
+  try {
+    const { error } = await sb.auth.signInWithPassword({ email: emailOf(login), password });
+    if (error) return /invalid/i.test(error.message) ? false : errMsg(error);
+    return true;
+  } catch (e) { return errMsg(e); }
+}
+async function logout() {
+  closeModal();
+  try { await sb.auth.signOut({ scope: 'local' }); } catch (e) {}
+  S.ready = false; S.me = null; S.role = null; S.draft = null;
+  showLogin();
+}
+function showLogin(msg) {
+  $('#app').innerHTML = `<div class="locked"><form id="loginform" class="login-card" autocomplete="on">
+    <div class="brand-mark" style="margin:0 auto;width:48px;height:48px;color:#fff">${ICON.cart.replace('<svg', '<svg stroke="#fff"')}</div>
+    <h1 style="text-align:center">Заявки на закупку</h1>
+    ${msg ? `<p class="muted" style="text-align:center;margin:0">${esc(msg)}</p>` : ''}
+    <label class="field"><span>Логин</span><input class="input" name="login" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false" required></label>
+    <label class="field"><span>Пароль</span><input class="input" name="password" type="password" autocomplete="current-password" required></label>
+    <label class="check"><input type="checkbox" name="remember" checked><span>Запомнить на этом устройстве<small>Если снять галочку, вход действует только в этом окне. Так можно держать две роли в двух вкладках.</small></span></label>
+    <div id="lerr" class="err" role="alert"></div>
+    <button class="btn primary block" type="submit" id="lbtn">Войти</button>
+  </form></div>`;
+}
+let started = false;
+async function startApp() {
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return showLogin();
+  S.me = session.user;
+  $('#app').innerHTML = '<div class="locked"><div class="muted">Загрузка…</div></div>';
+  try { await loadAll(); } catch (e) { return showLogin('Не удалось войти: ' + errMsg(e)); }
+  if (!S.role) return showLogin('Для этого аккаунта не назначена роль.');
+  S.ready = true;
+  if (!started) {
+    started = true;
+    subscribe();
+    sb.auth.onAuthStateChange(async () => {
+      // сверяем со своей сессией: события из других вкладок не должны ломать эту
+      const { data: { session: cur } } = await sb.auth.getSession();
+      if (!S.ready) return;
+      if (!cur) { S.ready = false; showLogin('Сессия закончилась. Войдите снова.'); }
+      else if (cur.user.id !== S.me.id) location.reload();
+    });
+  }
+  render();
+}
 async function boot() {
   $('#app').innerHTML = '<div class="locked"><div class="muted">Загрузка…</div></div>';
   const p = new URLSearchParams(location.hash.replace(/^#/, ''));
   const u = p.get('u'), k = p.get('k');
-  if (u && k) {
+  if (u && k) { // старые личные ссылки продолжают работать
     history.replaceState(null, '', location.pathname + location.search + '#/');
-    if (u !== 'requester' && u !== 'boss') return showLocked('Ссылка не подошла. Попросите новую.');
-    const { error } = await sb.auth.signInWithPassword({ email: u + '@' + LOGIN_DOMAIN, password: k });
-    if (error) return showLocked('Ссылка не подошла. Попросите новую.');
+    const ok = await doLogin(u, k, true);
+    if (ok !== true) return showLogin('Ссылка не подошла. Войдите по логину и паролю.');
   }
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) return showLocked();
-  S.me = session.user;
-  try { await loadAll(); } catch (e) { return showLocked('Не удалось загрузить данные: ' + errMsg(e)); }
-  if (!S.role) return showLocked('Для этой ссылки не назначена роль.');
-  S.ready = true;
-  subscribe();
-  render();
+  startApp();
 }
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 boot();
+
+/* без масштабирования на мобильных */
+['gesturestart', 'gesturechange', 'gestureend'].forEach((n) => document.addEventListener(n, (e) => e.preventDefault()));
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => { const n = Date.now(); if (n - lastTouchEnd < 300 && !e.target.closest('input,textarea,button,a')) e.preventDefault(); lastTouchEnd = n; }, { passive: false });
+document.addEventListener('touchmove', (e) => { if (e.touches && e.touches.length > 1) e.preventDefault(); }, { passive: false });
+document.addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });

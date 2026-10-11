@@ -1,4 +1,4 @@
-const CACHE_NAME = "zayavki-cache-v1.0";
+const CACHE_NAME = "zayavki-cache-v1.1";
 const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.json", "icon-192.png", "icon-512.png"];
 const LIB = "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js";
 
