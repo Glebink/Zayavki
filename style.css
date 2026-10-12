@@ -198,3 +198,11 @@ button.role-chip { background: transparent; cursor: pointer; }
 .pane-tools { display: flex; justify-content: space-between; align-items: center; }
 .tool-btn { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); color: inherit; text-decoration: none; }
 .tool-btn.on { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent); }
+.suggest .sug-row { display: flex; align-items: center; flex-wrap: nowrap; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); background: var(--surface); min-height: 56px; }
+.suggest .sug-row:last-child { border-bottom: 0; }
+.suggest .sug-row button { width: auto; min-height: 0; padding: 0; border: 0; background: transparent; }
+.suggest .sug-row .sug-main { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 12px; text-align: left; }
+.suggest .sug-row .sug-main .item-name, .suggest .sug-row .sug-main .muted { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.suggest .sug-row .sug-add { flex: none; white-space: nowrap; color: var(--accent); font-weight: 600; font-size: 13px; padding: 6px 2px; }
+.qty-in { flex: none; width: 44px; height: 32px; min-height: 0; padding: 0; text-align: center; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); font-family: var(--mono); font-size: 14px; -moz-appearance: textfield; }
+.qty-in::-webkit-outer-spin-button, .qty-in::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
