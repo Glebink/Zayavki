@@ -38,6 +38,7 @@ const ICON = {
   list: svg('<path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>', 22),
   archive: svg('<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10h14V9M10 13h4"/>', 22),
   box: svg('<path d="M12 3 3 8l9 5 9-5z"/><path d="m3 13 9 5 9-5"/>', 22),
+  eye: svg('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', 14),
   close: svg('<path d="M6 6l12 12M18 6 6 18"/>', 18)
 };
 
@@ -185,13 +186,17 @@ function isUnread(r) {
 }
 function bossSeen(r) {
   // состояние просмотра заявки начальником (для заявителя)
-  if (r.last_activity_by && S.profiles[r.last_activity_by] && S.profiles[r.last_activity_by].role === 'boss') return { ok: true, text: 'просмотрено ' + fmtShort(r.last_activity_at) };
+  if (r.last_activity_by && S.profiles[r.last_activity_by] && S.profiles[r.last_activity_by].role === 'boss') return { ok: true, when: fmtShort(r.last_activity_at) };
   const v = S.bossViews[r.id];
-  if (!v) return { ok: false, text: 'не просмотрено' };
-  if (Date.parse(v.seen_at) >= Date.parse(r.last_activity_at)) return { ok: true, text: 'просмотрено ' + fmtShort(v.seen_at) };
-  return { ok: false, text: 'есть изменения, не просмотрено' };
+  if (!v) return { ok: false, when: 'Начальник ещё не открывал заявку' };
+  if (Date.parse(v.seen_at) >= Date.parse(r.last_activity_at)) return { ok: true, when: fmtShort(v.seen_at) };
+  return { ok: false, when: 'Есть изменения после просмотра ' + fmtShort(v.seen_at) };
 }
-const eyeTag = (r) => { const b = bossSeen(r); return `<span class="seen ${b.ok ? 'ok' : ''}">${esc(b.text)}</span>`; };
+S.seenOpen = {};
+const eyeTag = (r) => {
+  const b = bossSeen(r), open = !!S.seenOpen[r.id];
+  return `<span class="seen-wrap"><button type="button" class="seen ${b.ok ? 'ok' : ''}" data-act="seen-toggle" data-id="${r.id}" aria-expanded="${open}">${ICON.eye}${b.ok ? 'Просмотрено' : 'Не просмотрено'}</button>${open ? `<span class="seen-when">${esc(b.when)}</span>` : ''}</span>`;
+};
 function counts(items) {
   const c = { new: 0, rejected: 0, accepted: 0, ordered: 0 };
   items.forEach((i) => { c[i.status]++; });
@@ -240,7 +245,7 @@ function render() {
       ${isReq() ? `<a class="btn primary btn-new" href="#/new">${ICON.plus}Новая заявка</a>` : ''}
       <button class="role-chip" data-act="account" aria-label="Аккаунт">Вы: ${esc(ROLE_LABEL[S.role] || '—')} ▾</button>
     </header>
-    <main class="main">${body}<div class="version">${APP_VERSION}</div></main>
+    <main class="main ${r.name === 'list' || r.name === 'archive' || r.name === 'detail' ? 'two' : ''}">${body}<div class="version">${APP_VERSION}</div></main>
     ${showBar ? `<nav class="bottom-nav" aria-label="Разделы">${navHTML}</nav>` : ''}
     ${showBar && isReq() && r.name !== 'detail' && r.name !== 'catalog' ? `<a class="fab" href="#/new">${ICON.plus}Новая заявка</a>` : ''}`;
 
@@ -303,7 +308,7 @@ function reqCard(r, sel) {
   const n = r.items.length;
   return `<a class="req-card ${sel ? 'sel' : ''}" href="#/r/${r.id}">
     <div class="row between"><span class="mono">№ ${r.number}</span>
-      <span class="row" style="gap:8px">${isUnread(r) ? '<span class="badge-new">Новое</span>' : (!r.archived_at && allDone && isReq() ? '<span class="tag-ok">Можно в архив</span>' : '')}${isReq() ? eyeTag(r) : ''}</span>
+      <span class="row" style="gap:8px">${isUnread(r) ? '<span class="badge-new">Новое</span>' : ''}${isReq() ? eyeTag(r) : ''}</span>
     </div>
     <div class="muted" style="font-size:13px;margin-top:4px">${fmt(r.created_at)} · ${plural(n, 'позиция', 'позиции', 'позиций')}</div>
     <div class="minis">${chips}</div></a>`;
@@ -634,6 +639,7 @@ document.addEventListener('click', async (e) => {
   const id = el.dataset.id;
   switch (act) {
     case 'filter': S.filter = el.dataset.f; render(); break;
+    case 'seen-toggle': e.preventDefault(); S.seenOpen[id] = !S.seenOpen[id]; render(); break;
     case 'account': S.account = true; renderModal(); break;
     case 'logout': logout(); break;
     case 'photo': S.photo = S.photoUrls[el.dataset.path]; if (S.photo) renderModal(); break;
