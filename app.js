@@ -309,7 +309,7 @@ function reqCard(r, sel) {
   const allDone = r.items.length > 0 && r.items.every(isDone);
   const chips = ['new', 'accepted', 'ordered', 'rejected'].filter((k) => c[k]).map((k) => `<span class="mini ${STATUS[k].cls}">${STATUS[k].label} ${c[k]}</span>`).join('');
   const n = r.items.length;
-  return `<a class="req-card ${sel ? 'sel' : ''}" href="#/r/${r.id}">
+  return `<a class="req-card ${sel ? 'sel' : ''}" href="${sel ? (r.archived_at ? '#/archive' : '#/') : '#/r/' + r.id}">
     <div class="row between"><span class="mono">№ ${r.number}</span>
       <span class="row" style="gap:8px">${isUnread(r) ? '<span class="badge-new">Новое</span>' : ''}${isReq() ? eyeTag(r) : ''}</span>
     </div>
@@ -410,11 +410,12 @@ function renderCatalogList() {
 
 /* ----- создание заявки ----- */
 function ensureDraft() { if (!S.draft) S.draft = { requestId: null, items: [] }; return S.draft; }
-function addToDraft(c) {
+function addToDraft(c, qty) {
   const d = ensureDraft();
+  qty = Math.max(1, parseInt(qty, 10) || 1);
   const ex = d.items.find((x) => x.catalog_item_id === c.id);
-  if (ex) { ex.qty += 1; return; }
-  d.items.push({ name: c.name, shop_url: c.shop_url || '', qty: 1, comment: '', photo_path: c.photo_path || null, catalog_item_id: c.id });
+  if (ex) { ex.qty += qty; return; }
+  d.items.push({ name: c.name, shop_url: c.shop_url || '', qty, comment: '', photo_path: c.photo_path || null, catalog_item_id: c.id });
 }
 function newHTML() {
   if (!isReq()) return '<div class="empty">Заявки создаёт заявитель</div>';
@@ -424,11 +425,11 @@ function newHTML() {
     <div class="field"><span>Добавить из каталога</span>
       <label class="search" style="border:2px solid var(--accent)">${ICON.search}<input type="search" id="nvq" placeholder="Начните вводить название" autocomplete="off"></label></div>
     <div id="nvsug"></div>
-    <button class="btn ghost block" data-act="draft-new">${ICON.plus}Нет в списке — добавить новый товар</button>
+    <button class="btn ghost block" data-act="draft-new">${ICON.plus}Добавить новый товар</button>
     <div class="muted" style="font-size:13px;font-weight:600">В заявке <span class="mono">${d.items.length}</span></div>
     <div id="draftlist" style="display:flex;flex-direction:column;gap:10px">${draftItemsHTML()}</div>
   </div>
-  <div class="submit-bar"><button class="btn primary block" data-act="submit" ${d.items.length ? '' : 'disabled'}>Отправить начальнику · ${d.items.length} поз.</button></div>`;
+  <div class="submit-bar"><button class="btn primary block" data-act="submit" ${d.items.length ? '' : 'disabled'}>Отправить</button></div>`;
 }
 function draftItemsHTML() {
   const d = ensureDraft();
@@ -438,15 +439,19 @@ function draftItemsHTML() {
     <button class="icon-btn" data-act="draft-edit" data-idx="${idx}" aria-label="Редактировать">${ICON.edit}</button>
     <button class="icon-btn" data-act="draft-del" data-idx="${idx}" aria-label="Убрать" style="color:var(--danger)">${ICON.trash}</button></div>`).join('');
 }
-function suggestHTML(q, act) {
+function suggestHTML(q, act, withQty) {
   const t = q.trim().toLowerCase();
   const list = (t ? S.catalog.filter((c) => c.name.toLowerCase().includes(t)) : S.catalog.slice().sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))).slice(0, 6);
   if (!list.length) return t ? '<div class="muted" style="font-size:13px">В каталоге такого нет. Добавьте новый товар.</div>' : '';
+  if (withQty) return `<div class="suggest">${list.map((c) => `<div class="sug-row"><button type="button" class="sug-main" data-act="${act}" data-id="${c.id}">${thumbPlain(c.photo_path)}
+    <span class="grow"><span class="item-name" style="display:block">${esc(c.name)}</span><span class="muted" style="font-size:12px">${c.shop_url ? shopLabel(c.shop_url) : 'без ссылки'}</span></span></button>
+    <input class="qty-in" type="number" min="1" inputmode="numeric" value="1" data-qty-for="${c.id}" aria-label="Количество">
+    <button type="button" class="sug-add" data-act="${act}" data-id="${c.id}">Добавить</button></div>`).join('')}</div>`;
   return `<div class="suggest">${list.map((c) => `<button type="button" data-act="${act}" data-id="${c.id}">${thumbPlain(c.photo_path)}
     <span class="grow"><span class="item-name" style="display:block">${esc(c.name)}</span><span class="muted" style="font-size:12px">${c.shop_url ? shopLabel(c.shop_url) : 'без ссылки'}</span></span>
     <span style="color:var(--accent);font-weight:600;font-size:13px">Добавить</span></button>`).join('')}</div>`;
 }
-function renderNewSuggest() { const q = $('#nvq'); const box = $('#nvsug'); if (box) box.innerHTML = suggestHTML(q ? q.value : '', 'draft-add-cat'); }
+function renderNewSuggest() { const q = $('#nvq'); const box = $('#nvsug'); if (box) box.innerHTML = suggestHTML(q ? q.value : '', 'draft-add-cat', true); }
 
 async function submitDraft() {
   const d = S.draft;
@@ -681,7 +686,7 @@ document.addEventListener('click', async (e) => {
     }
     case 'draft-add-cat': {
       const c = S.catalog.find((x) => x.id === id);
-      if (c) { addToDraft(c); const q = $('#nvq'); if (q) q.value = ''; render(); }
+      if (c) { const qi = document.querySelector('[data-qty-for="' + id + '"]'); addToDraft(c, qi ? qi.value : 1); const q = $('#nvq'); if (q) q.value = ''; render(); }
       break;
     }
     case 'draft-new': openSheet({ mode: 'draft', title: 'Новый товар' }); break;
