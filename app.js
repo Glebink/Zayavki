@@ -275,10 +275,13 @@ function markSeen(req) {
 
 /* ----- список заявок ----- */
 function listPane(archived, selId, hideMobile) {
-  const chips = [['all', 'Все'], ['new', 'Новые'], ['accepted', 'Принято'], ['ordered', 'Заказано'], ['rejected', 'Отказ']];
+  const open = S.searchOpen || !!S.q;
   return `<section class="pane-list ${hideMobile ? 'hide-mobile' : ''}" data-archived="${archived ? 1 : 0}" data-sel="${esc(selId || '')}">
-    <label class="search">${ICON.search}<input type="search" id="q" placeholder="Поиск по заявкам и товарам" value="${esc(S.q)}" autocomplete="off"></label>
-    <div class="chips">${chips.map((c) => `<button class="chip ${S.filter === c[0] ? 'on' : ''}" data-act="filter" data-f="${c[0]}">${c[1]}</button>`).join('')}</div>
+    <div class="pane-tools">
+      <button class="icon-btn tool-btn ${open ? 'on' : ''}" data-act="search-toggle" aria-label="Поиск" aria-expanded="${open}">${ICON.search}</button>
+      ${isReq() ? `<a class="icon-btn tool-btn tool-new" href="#/new" aria-label="Новая заявка">${ICON.plus}</a>` : ''}
+    </div>
+    ${open ? `<label class="search">${ICON.search}<input type="search" id="q" placeholder="Поиск по заявкам и товарам" value="${esc(S.q)}" autocomplete="off"></label>` : ''}
     <div id="reqlist" style="display:flex;flex-direction:column;gap:10px"></div>
   </section>`;
 }
@@ -639,6 +642,7 @@ document.addEventListener('click', async (e) => {
   const id = el.dataset.id;
   switch (act) {
     case 'filter': S.filter = el.dataset.f; render(); break;
+    case 'search-toggle': { const open = S.searchOpen || !!S.q; S.searchOpen = !open; if (open) S.q = ''; render(); if (S.searchOpen) { const q = $('#q'); if (q) q.focus(); } break; }
     case 'seen-toggle': e.preventDefault(); S.seenOpen[id] = !S.seenOpen[id]; render(); break;
     case 'account': S.account = true; renderModal(); break;
     case 'logout': logout(); break;
