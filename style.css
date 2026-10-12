@@ -206,3 +206,7 @@ button.role-chip { background: transparent; cursor: pointer; }
 .suggest .sug-row .sug-add { flex: none; white-space: nowrap; color: var(--accent); font-weight: 600; font-size: 13px; padding: 6px 2px; }
 .qty-in { flex: none; width: 44px; height: 32px; min-height: 0; padding: 0; text-align: center; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); font-family: var(--mono); font-size: 14px; -moz-appearance: textfield; }
 .qty-in::-webkit-outer-spin-button, .qty-in::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+@media (min-width: 900px) {
+  .main.two .submit-bar { left: 380px; }
+  .main.two .pane-detail .narrow { margin: 0; }
+}

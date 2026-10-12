@@ -211,6 +211,8 @@ function showLocked(msg) {
     <p class="muted">${esc(msg || 'Откройте личную ссылку, которую вам выдали.')}</p></div></div>`;
 }
 
+const deskMQ = window.matchMedia('(min-width: 900px)');
+const isDesk = () => deskMQ.matches;
 function render() {
   if (!S.ready) return;
   const y = window.scrollY;
@@ -224,11 +226,21 @@ function render() {
   const activeTab = r.name === 'detail'
     ? ((S.requests.find((x) => x.id === r.id) || {}).archived_at ? 'archive' : 'list')
     : (r.name === 'new' ? 'list' : r.name);
-  const tabsHTML = tabs.map((t) => `<a class="tab ${t[1] === activeTab ? 'active' : ''}" href="${t[0]}">${t[2]}${t[4] ? `<span class="count">${t[4]}</span>` : ''}</a>`).join('');
+  const tabsHTML = tabs.filter((t) => t[1] !== 'list').map((t) => `<a class="tab ${t[1] === activeTab ? 'active' : ''}" href="${t[1] === activeTab ? '#/' : t[0]}">${t[2]}</a>`).join('');
   const navHTML = tabs.map((t) => `<a class="${t[1] === activeTab ? 'active' : ''}" href="${t[0]}">${t[3]}${t[2]}${t[4] ? `<span class="count">${t[4]}</span>` : ''}</a>`).join('');
 
+  const desk = isDesk();
   let body = '';
-  if (r.name === 'new') body = newHTML();
+  if (desk) {
+    const sreq = r.name === 'detail' ? S.requests.find((x) => x.id === r.id) : null;
+    let right;
+    if (r.name === 'detail') right = sreq ? detailHTML(sreq) : '<div class="empty">Заявка не найдена</div>';
+    else if (r.name === 'archive') right = '<div class="narrow" style="max-width:none"><h1>Архив</h1><div id="archlist" style="display:flex;flex-direction:column;gap:10px;max-width:680px"></div></div>';
+    else if (r.name === 'catalog') right = catalogHTML();
+    else if (r.name === 'new') right = newHTML();
+    else right = '<div class="empty">Выберите заявку слева</div>';
+    body = `<div class="layout">${listPane(false, sreq && !sreq.archived_at ? r.id : null, false)}<section class="pane-detail">${right}</section></div>`;
+  } else if (r.name === 'new') body = newHTML();
   else if (r.name === 'catalog') body = catalogHTML();
   else if (r.name === 'detail') {
     const req = S.requests.find((x) => x.id === r.id);
@@ -237,7 +249,7 @@ function render() {
     body = `<div class="layout">${listPane(r.name === 'archive', null, false)}<section class="pane-detail hide-mobile"><div class="empty">Выберите заявку слева</div></section></div>`;
   }
 
-  const showBar = r.name !== 'new';
+  const showBar = desk ? false : r.name !== 'new';
   $('#app').innerHTML = `
     <header class="header">
       <div class="brand"><span class="brand-mark">${ICON.cart.replace('<svg', '<svg stroke="#fff"')}</span>Заявки на закупку</div>
@@ -245,11 +257,14 @@ function render() {
       ${isReq() ? `<a class="btn primary btn-new" href="#/new">${ICON.plus}Новая заявка</a>` : ''}
       <button class="role-chip" data-act="account" aria-label="Аккаунт">Вы: ${esc(ROLE_LABEL[S.role] || '—')} ▾</button>
     </header>
-    <main class="main ${r.name === 'list' || r.name === 'archive' || r.name === 'detail' ? 'two' : ''}">${body}<div class="version">${APP_VERSION}</div></main>
+    <main class="main ${desk || r.name === 'list' || r.name === 'archive' || r.name === 'detail' ? 'two' : ''}">${body}<div class="version">${APP_VERSION}</div></main>
     ${showBar ? `<nav class="bottom-nav" aria-label="Разделы">${navHTML}</nav>` : ''}
     ${showBar && isReq() && r.name !== 'detail' && r.name !== 'catalog' ? `<a class="fab" href="#/new">${ICON.plus}Новая заявка</a>` : ''}`;
 
-  if (r.name === 'list' || r.name === 'archive' || r.name === 'detail') renderList();
+  if (desk) {
+    renderList();
+    if (r.name === 'archive') { const box = $('#archlist'); const l = visibleRequests(true); box.innerHTML = l.length ? l.map((x) => reqCard(x, false)).join('') : '<div class="empty">В архиве пусто</div>'; }
+  } else if (r.name === 'list' || r.name === 'archive' || r.name === 'detail') renderList();
   if (r.name === 'new') renderNewSuggest();
   if (r.name === 'catalog') renderCatalogList();
   window.scrollTo(0, y);
@@ -395,6 +410,7 @@ function catalogHTML() {
   return `<div class="narrow"><h1>Каталог товаров</h1>
     <p class="muted" style="margin:0">Все товары, которые когда-либо добавляли в заявки.</p>
     <label class="search">${ICON.search}<input type="search" id="catq" placeholder="Найти товар" value="${esc(S.catq || '')}" autocomplete="off"></label>
+    ${isReq() ? `<button class="btn ghost block" data-act="cat-new">${ICON.plus}Добавить новый товар</button>` : ''}
     <div id="catlist" style="display:flex;flex-direction:column;gap:10px"></div></div>`;
 }
 function renderCatalogList() {
@@ -530,11 +546,11 @@ function renderModal() {
       ${prev ? '<button type="button" class="btn" data-act="sh-photo-clear" style="align-self:flex-start;min-height:36px">Убрать фото</button>' : ''}
       <div id="sh-sug"></div>
       <label class="field"><span>Ссылка на магазин</span><input class="input" data-field="shop_url" value="${esc(d.shop_url)}" inputmode="url" autocapitalize="off" maxlength="500"></label>
-      <div class="row" style="align-items:flex-end">
+      ${s.mode === 'catalog' ? '' : `<div class="row" style="align-items:flex-end">
         <div class="field"><span>Количество</span><div class="stepper"><button type="button" data-act="qty-minus" aria-label="Меньше">−</button>
           <input id="sh-qty" data-field="qty" type="number" min="1" inputmode="numeric" value="${d.qty}" aria-label="Количество"><button type="button" data-act="qty-plus" aria-label="Больше">+</button></div></div>
         <label class="field" style="flex:1;min-width:0"><span>Комментарий</span><input class="input" data-field="comment" value="${esc(d.comment)}" maxlength="300"></label>
-      </div>
+      </div>`}
       <div class="row" style="justify-content:flex-end;margin-top:4px"><button class="btn" data-act="sheet-cancel">Отмена</button><button class="btn primary" data-act="sheet-save" id="sh-save">Сохранить</button></div>
     </div>`;
     return;
@@ -577,7 +593,7 @@ async function saveSheet() {
   const name = d.name.trim();
   const qty = parseInt(d.qty, 10);
   if (!name) return toast('Введите название');
-  if (!(qty >= 1)) return toast('Количество должно быть не меньше 1');
+  if (s.mode !== 'catalog' && !(qty >= 1)) return toast('Количество должно быть не меньше 1');
   s.busy = true;
   const btn = $('#sh-save'); if (btn) { btn.disabled = true; btn.textContent = 'Сохранение…'; }
   try {
@@ -590,7 +606,11 @@ async function saveSheet() {
       if (data) S.photoUrls[path] = data.signedUrl;
     }
     const item = { name, shop_url: d.shop_url.trim() || null, qty, comment: d.comment.trim() || null, photo_path: d.photo_path || null };
-    if (s.mode === 'draft') {
+    if (s.mode === 'catalog') {
+      const { error } = await sb.from('catalog_items').insert({ name, shop_url: item.shop_url, photo_path: item.photo_path });
+      if (error) { if (error.code === '23505') throw new Error('Такой товар уже есть в каталоге.'); throw error; }
+      closeModal(); await refresh(); toast('Товар добавлен в каталог');
+    } else if (s.mode === 'draft') {
       const row = { name, shop_url: item.shop_url || '', qty, comment: item.comment || '', photo_path: item.photo_path, catalog_item_id: d.catalog_item_id };
       const dr = ensureDraft();
       if (s.idx != null) dr.items[s.idx] = row; else dr.items.push(row);
@@ -679,6 +699,7 @@ document.addEventListener('click', async (e) => {
       location.hash = '#/new';
       break;
     }
+    case 'cat-new': openSheet({ mode: 'catalog', title: 'Новый товар в каталог' }); break;
     case 'cat-add': {
       const c = S.catalog.find((x) => x.id === id);
       if (c) { addToDraft(c); toast('Добавлено в новую заявку'); }
@@ -727,7 +748,7 @@ document.addEventListener('input', (e) => {
     if (f === 'name') {
       S.sheet.d.catalog_item_id = null;
       const box = $('#sh-sug');
-      if (box) box.innerHTML = S.sheet.mode === 'req-edit' ? '' : suggestHTML(t.value, 'sh-pick').replace(/Добавить<\/span>/g, 'Выбрать</span>');
+      if (box) box.innerHTML = (S.sheet.mode === 'req-edit' || S.sheet.mode === 'catalog') ? '' : suggestHTML(t.value, 'sh-pick').replace(/Добавить<\/span>/g, 'Выбрать</span>');
     }
   }
 });
@@ -765,6 +786,7 @@ document.addEventListener('submit', async (e) => {
     closeModal(); toast('Пароль изменён');
   }
 });
+deskMQ.addEventListener('change', () => render());
 window.addEventListener('hashchange', () => { closeModal(); render(); window.scrollTo(0, 0); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.ready) refresh(); });
 
