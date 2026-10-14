@@ -802,11 +802,15 @@ async function doLogin(login, password, remember) {
     return true;
   } catch (e) { return errMsg(e) + ' (' + ((e && e.message) || e) + ')'; }
 }
-async function logout() {
+function logout() {
+  // выходим сразу, не дожидаясь сервера: при плохой связи запрос на выход может висеть долго
   closeModal();
-  try { await sb.auth.signOut({ scope: 'local' }); } catch (e) {}
-  S.ready = false; S.me = null; S.role = null; S.draft = null;
+  S.ready = false; S.me = null; S.role = null; S.draft = null; S.requests = []; S.catalog = [];
+  try { Object.keys(localStorage).concat(Object.keys(sessionStorage)).filter((k) => k.startsWith('sb-')).forEach((k) => authStore.removeItem(k)); } catch (e) {}
+  started = false;
+  try { sb.removeAllChannels(); } catch (e) {}
   showLogin();
+  Promise.resolve().then(() => sb.auth.signOut({ scope: 'local' })).catch(() => {});
 }
 function showLogin(msg) {
   $('#app').innerHTML = `<div class="locked"><form id="loginform" class="login-card" autocomplete="on">
@@ -820,7 +824,7 @@ function showLogin(msg) {
     <button class="btn primary block" type="submit" id="lbtn">Войти</button>
   </form></div>`;
 }
-let started = false;
+let started = false, authBound = false;
 async function startApp() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) return showLogin();
@@ -829,9 +833,10 @@ async function startApp() {
   try { await loadAll(); } catch (e) { return showLogin('Не удалось войти: ' + errMsg(e)); }
   if (!S.role) return showLogin('Для этого аккаунта не назначена роль.');
   S.ready = true;
-  if (!started) {
-    started = true;
-    subscribe();
+  if (!started) { started = true; subscribe(); }
+  if (!authBound) {
+    authBound = true;
+    {
     sb.auth.onAuthStateChange(async () => {
       // сверяем со своей сессией: события из других вкладок не должны ломать эту
       const { data: { session: cur } } = await sb.auth.getSession();
@@ -839,6 +844,7 @@ async function startApp() {
       if (!cur) { S.ready = false; showLogin('Сессия закончилась. Войдите снова.'); }
       else if (cur.user.id !== S.me.id) location.reload();
     });
+    }
   }
   render();
 }
